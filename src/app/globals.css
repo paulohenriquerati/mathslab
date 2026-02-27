@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-border: var(--border);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --font-sans: var(--font-space-grotesk);
+  --font-mono: var(--font-ibm-plex-mono);
+}
+
+:root {
+  --background: oklch(0.985 0.01 90);
+  --foreground: oklch(0.22 0.02 255);
+  --border: oklch(0.9 0.01 90);
+  --card: oklch(0.995 0.008 90);
+  --card-foreground: var(--foreground);
+  --muted: oklch(0.96 0.01 90);
+  --muted-foreground: oklch(0.52 0.02 250);
+  --primary: oklch(0.67 0.16 37);
+  --primary-foreground: oklch(0.99 0.01 90);
+  --secondary: oklch(0.91 0.03 180);
+  --secondary-foreground: oklch(0.28 0.05 200);
+  --accent: oklch(0.84 0.08 187);
+  --accent-foreground: oklch(0.23 0.04 210);
+  --ring: oklch(0.69 0.15 37);
+  --success: oklch(0.73 0.16 150);
+  --success-foreground: oklch(0.2 0.05 150);
+  --warning: oklch(0.85 0.13 86);
+  --warning-foreground: oklch(0.28 0.06 86);
+  --danger: oklch(0.67 0.21 28);
+  --danger-foreground: oklch(0.985 0.01 90);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body {
+    min-height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    background-image:
+      radial-gradient(circle at 12% 12%, color-mix(in oklab, var(--accent) 24%, white) 0%, transparent 42%),
+      radial-gradient(circle at 88% 8%, color-mix(in oklab, var(--primary) 18%, white) 0%, transparent 48%),
+      radial-gradient(circle at 52% 96%, color-mix(in oklab, var(--secondary) 20%, white) 0%, transparent 52%),
+      linear-gradient(180deg, color-mix(in oklab, var(--background) 96%, white) 0%, var(--background) 100%);
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 35%, white);
+    color: var(--foreground);
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-3xl border bg-card/90 shadow-[0_12px_60px_-36px_rgba(0,0,0,0.35)] backdrop-blur;
+  }
+
+  .panel-soft {
+    @apply rounded-2xl border bg-white/75 backdrop-blur-sm;
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium tracking-wide;
+  }
+
+  .grid-dot {
+    background-image: radial-gradient(circle, rgba(17, 24, 39, 0.08) 1px, transparent 1px);
+    background-size: 14px 14px;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
