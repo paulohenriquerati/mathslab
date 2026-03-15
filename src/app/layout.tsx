@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+import { IdentityProvider } from "@/lib/auth/identity-context";
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
@@ -14,9 +15,9 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NiniMath Brain Lab",
+  title: "BrainLab",
   description:
-    "Ninimath-inspired mental arithmetic drills with timed addition, subtraction, multiplication, and division rounds.",
+    "A math game with timed addition, subtraction, multiplication, and division rounds.",
 };
 
 export default function RootLayout({
@@ -27,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${spaceGrotesk.variable} ${ibmPlexMono.variable} min-h-screen antialiased`}>
-        {children}
+        <IdentityProvider>{children}</IdentityProvider>
       </body>
     </html>
   );

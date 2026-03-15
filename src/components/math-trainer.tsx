@@ -1,7 +1,8 @@
-﻿"use client";
+"use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import gsap from "gsap";
+import Link from "next/link";
 import {
   type FormEvent,
   startTransition,
@@ -25,6 +26,8 @@ import {
   summarizeSession,
 } from "@/lib/math/scoring";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { useIdentity } from "@/lib/auth/identity-context";
+import SessionResultsModal from "@/components/session-results-modal";
 import {
   type AttemptRecord,
   type LeaderboardEntry,
@@ -40,10 +43,20 @@ type FeedbackState =
 
 type SaveState = "idle" | "saving" | "saved" | "offline" | "error";
 
-const ROUND_OPTIONS = [60, 90, 120, 180] as const;
+const ROUND_OPTIONS = [15, 30, 60, 90, 120, 180] as const;
 const TICK_MS = 100;
 const LOCAL_LEADERBOARD_KEY = "ninimath-brain-lab:leaderboard";
 const ALL_OPERATIONS = [...OPERATION_KEYS] as OperationKey[];
+
+type OperationMode = "all" | OperationKey;
+
+const MODE_PRESETS: { mode: OperationMode; label: string; ops: OperationKey[] }[] = [
+  { mode: "all",            label: "All",              ops: [...ALL_OPERATIONS] },
+  { mode: "addition",       label: "[+] Addition",      ops: ["addition"] },
+  { mode: "subtraction",    label: "[-] Subtraction",   ops: ["subtraction"] },
+  { mode: "multiplication", label: "[×] Multiplication",ops: ["multiplication"] },
+  { mode: "division",       label: "[÷] Division",      ops: ["division"] },
+];
 
 function formatClock(ms: number) {
   const totalSeconds = Math.ceil(ms / 1000);
@@ -143,10 +156,12 @@ function StatTile({
 export default function MathTrainer() {
   const prefersReducedMotion = useReducedMotion() ?? false;
   const supabaseConfigured = Boolean(getSupabaseBrowserClient());
+  const { playerName, isGuest, signOut } = useIdentity();
 
-  const [playerName, setPlayerName] = useState("Player");
-  const [enabledOperations, setEnabledOperations] = useState<OperationKey[]>([...ALL_OPERATIONS]);
+  const [operationMode, setOperationMode] = useState<OperationMode>("all");
   const [roundSeconds, setRoundSeconds] = useState(90);
+
+  const enabledOperations = MODE_PRESETS.find((p) => p.mode === operationMode)?.ops ?? ALL_OPERATIONS;
 
   const [question, setQuestion] = useState<MathQuestion>(() =>
     generateQuestion({ enabledOperations: ALL_OPERATIONS, difficulty: 1 }),
@@ -170,6 +185,7 @@ export default function MathTrainer() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(true);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
 
   const deferredHistory = useDeferredValue(history);
 
@@ -290,10 +306,12 @@ export default function MathTrainer() {
         operationSet: activeOperations,
       }),
       history,
+      isGuest,
     };
 
     setLastSummary(payload);
     void persistSession(payload);
+    setShowModal(true);
   });
 
   const startSession = useEffectEvent(() => {
@@ -310,6 +328,7 @@ export default function MathTrainer() {
     setLastSummary(null);
     setSaveState("idle");
     setIsSessionOver(false);
+    setShowModal(false);
     setTimeLeftMs(roundSeconds * 1000);
     setIsRunning(true);
     setQuestion(generateQuestion({ enabledOperations: activeOperations, difficulty: 1 }));
@@ -473,10 +492,10 @@ export default function MathTrainer() {
               <div>
                 <div className="pill border-primary/25 bg-primary/8 text-primary">
                   <span className="h-2 w-2 rounded-full bg-primary" />
-                  Ninimath-inspired brain drills
+                  BrainLab
                 </div>
                 <h1 className="mt-3 text-balance text-2xl font-semibold tracking-tight sm:text-4xl">
-                  NiniMath Brain Lab
+                  Your math mental gym!
                 </h1>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
                   Timed mental arithmetic with adaptive difficulty for addition,
@@ -484,25 +503,38 @@ export default function MathTrainer() {
                   and optional Supabase persistence.
                 </p>
               </div>
-              <div className="grid min-w-[220px] gap-2 self-start">
-                <label className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                  Player
-                </label>
-                <input
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value.slice(0, 24))}
-                  disabled={isRunning}
-                  className="h-11 rounded-xl border bg-white/80 px-3 text-sm outline-none focus:border-primary/40 disabled:cursor-not-allowed disabled:opacity-70"
-                  placeholder="Player"
-                  maxLength={24}
-                />
+              {/* Identity pill */}
+              <div className="flex flex-col items-end gap-2 self-start">
+                <div className="pill border-border bg-white/80 text-foreground">
+                  <span className="h-2 w-2 rounded-full bg-success" />
+                  {playerName}
+                  {isGuest && (
+                    <span className="text-red-600">&nbsp;(GUEST)</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <Link
+                    href="/stats"
+                    className="text-[11px] uppercase tracking-[0.15em] text-muted-foreground transition hover:text-foreground"
+                  >
+                    📊 Stats
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => void signOut()}
+                    disabled={isRunning}
+                    className="text-[11px] uppercase tracking-[0.15em] text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Sign out
+                  </button>
+                </div>
               </div>
             </div>
 
             <div className="mt-5 rounded-2xl border bg-white/65 p-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  <div className="text-[13px] uppercase tracking-[0.18em] text-red-500">
                     Round Timer
                   </div>
                   <div className="mt-1 font-mono text-2xl font-semibold tracking-tight sm:text-3xl">
@@ -516,11 +548,10 @@ export default function MathTrainer() {
                       type="button"
                       onClick={() => setRoundSeconds(seconds)}
                       disabled={isRunning}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                        roundSeconds === seconds
-                          ? "border-primary/40 bg-primary/10 text-primary"
-                          : "border-border bg-white/70 text-foreground hover:bg-white"
-                      } disabled:cursor-not-allowed disabled:opacity-55`}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${roundSeconds === seconds
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "border-border bg-white/70 text-foreground hover:bg-white"
+                        } disabled:cursor-not-allowed disabled:opacity-55`}
                     >
                       {seconds}s
                     </button>
@@ -536,35 +567,34 @@ export default function MathTrainer() {
               </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap gap-2">
-              {ALL_OPERATIONS.map((operation) => {
-                const selected = enabledOperations.includes(operation);
-                return (
-                  <button
-                    key={operation}
-                    type="button"
-                    disabled={isRunning}
-                    onClick={() => {
-                      setEnabledOperations((prev) => {
-                        const exists = prev.includes(operation);
-                        if (exists) {
-                          if (prev.length === 1) return prev;
-                          return prev.filter((item) => item !== operation);
-                        }
-                        return [...prev, operation];
-                      });
-                    }}
-                    className={`rounded-full border px-3 py-2 text-sm font-medium transition ${
-                      selected
-                        ? "border-accent/45 bg-accent/20 text-accent-foreground"
-                        : "border-border bg-white/70 text-foreground hover:bg-white"
-                    } disabled:cursor-not-allowed disabled:opacity-60`}
-                    aria-pressed={selected}
-                  >
-                    {operationDisplayName(operation)}
-                  </button>
-                );
-              })}
+            {/* Operation mode selector */}
+            <div className="mt-5">
+              <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                Mode
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {MODE_PRESETS.map(({ mode, label }) => {
+                  const selected = operationMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      disabled={isRunning}
+                      onClick={() => setOperationMode(mode)}
+                      aria-pressed={selected}
+                      className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                        selected
+                          ? mode === "all"
+                            ? "border-primary/40 bg-primary/12 text-primary"
+                            : "border-accent/45 bg-accent/20 text-accent-foreground"
+                          : "border-border bg-white/70 text-foreground hover:bg-white"
+                      } disabled:cursor-not-allowed disabled:opacity-60`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -669,29 +699,15 @@ export default function MathTrainer() {
               </div>
             </div>
 
-            {isSessionOver && lastSummary ? (
-              <motion.div
-                initial={prefersReducedMotion ? false : { opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: prefersReducedMotion ? 0 : 0.22 }}
-                className="mt-5 rounded-2xl border border-primary/20 bg-primary/6 p-4 sm:p-5"
-              >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                      Round summary
-                    </div>
-                    <div className="mt-1 text-lg font-semibold tracking-tight sm:text-xl">
-                      {lastSummary.playerName}: {lastSummary.score} pts, {lastSummary.accuracy}% accuracy
-                    </div>
-                    <div className="mt-1 text-sm text-muted-foreground">
-                      {lastSummary.correctAnswers}/{lastSummary.totalAttempts} correct, avg {formatMs(lastSummary.averageResponseMs)}, streak {lastSummary.bestStreak}
-                    </div>
-                  </div>
-                  <div className="pill border-border bg-white/80 text-foreground">{saveStateLabel}</div>
-                </div>
-              </motion.div>
-            ) : null}
+            {/* Session results modal */}
+            <SessionResultsModal
+              summary={showModal && isSessionOver ? lastSummary : null}
+              leaderboard={leaderboard}
+              saveStateLabel={saveStateLabel}
+              onPlayAgain={() => startSession()}
+              onClose={() => setShowModal(false)}
+              prefersReducedMotion={prefersReducedMotion}
+            />
           </div>
         </motion.section>
 
@@ -755,16 +771,14 @@ export default function MathTrainer() {
               {deferredHistory.map((attempt) => (
                 <div
                   key={`${attempt.questionId}-${attempt.createdAt}`}
-                  className={`panel-soft p-3 ${
-                    attempt.isCorrect ? "border-success/25 bg-success/8" : "border-danger/18 bg-danger/5"
-                  }`}
+                  className={`panel-soft p-3 ${attempt.isCorrect ? "border-success/25 bg-success/8" : "border-danger/18 bg-danger/5"
+                    }`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-mono text-sm font-semibold">{attempt.prompt}</div>
                     <div
-                      className={`text-xs font-semibold uppercase tracking-[0.15em] ${
-                        attempt.isCorrect ? "text-success-foreground" : "text-danger"
-                      }`}
+                      className={`text-xs font-semibold uppercase tracking-[0.15em] ${attempt.isCorrect ? "text-success-foreground" : "text-danger"
+                        }`}
                     >
                       {attempt.isCorrect ? "OK" : "MISS"}
                     </div>

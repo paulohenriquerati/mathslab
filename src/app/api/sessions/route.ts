@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import {
@@ -70,7 +70,9 @@ function normalizePayload(value: unknown): SessionPayload | null {
     durationSeconds: Math.max(10, Math.round(durationSeconds)),
     averageResponseMs: Math.max(0, Math.round(averageResponseMs)),
     operationSet: normalizeOperationSet(value.operationSet),
-    history: normalizeHistory(value.history) as SessionPayload["history"],
+    history: normalizeHistory(value.history) as unknown as SessionPayload["history"],
+    // Default to guest=true so untagged sessions are treated conservatively.
+    isGuest: value.isGuest === false ? false : true,
   };
 }
 
@@ -98,9 +100,15 @@ export async function GET() {
     return NextResponse.json({ disabled: true, entries: [] });
   }
 
+  // Exclude guest rows that have passed the 5-minute TTL.
+  const guestExpiryCutoff = new Date(
+    Date.now() - 5 * 60 * 1000,
+  ).toISOString();
+
   const { data, error } = await supabase
     .from("math_sessions")
     .select("id, player_name, score, accuracy, best_streak, duration_seconds, operation_set, created_at")
+    .or(`is_guest.eq.false,created_at.gt.${guestExpiryCutoff}`)
     .order("score", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(20);
@@ -135,6 +143,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid session payload" }, { status: 400 });
   }
 
+  // Fire-and-forget: purge expired guest rows before inserting (Free-tier
+  // fallback in case pg_cron is not available on this Supabase plan).
+  const guestExpiryCutoff = new Date(
+    Date.now() - 5 * 60 * 1000,
+  ).toISOString();
+  void supabase
+    .from("math_sessions")
+    .delete()
+    .eq("is_guest", true)
+    .lt("created_at", guestExpiryCutoff);
+
   const { data, error } = await supabase
     .from("math_sessions")
     .insert({
@@ -148,6 +167,7 @@ export async function POST(request: NextRequest) {
       average_response_ms: payload.averageResponseMs,
       operation_set: payload.operationSet,
       history: payload.history,
+      is_guest: payload.isGuest ?? true,
     })
     .select("id, player_name, score, accuracy, best_streak, duration_seconds, operation_set, created_at")
     .single();

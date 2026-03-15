@@ -99,13 +99,13 @@ export function generateQuestion(options: {
 export function operationBadgeLabel(operation: OperationKey) {
   switch (operation) {
     case "addition":
-      return "Add";
+      return "+";
     case "subtraction":
-      return "Sub";
+      return "-";
     case "multiplication":
-      return "Mul";
+      return "×";
     case "division":
-      return "Div";
+      return "÷";
     default:
       return operation;
   }
@@ -114,13 +114,13 @@ export function operationBadgeLabel(operation: OperationKey) {
 export function operationDisplayName(operation: OperationKey) {
   switch (operation) {
     case "addition":
-      return "Addition";
+      return "[+] Addition";
     case "subtraction":
-      return "Subtraction";
+      return "[-] Subtraction";
     case "multiplication":
-      return "Multiplication";
+      return "[×] Multiplication";
     case "division":
-      return "Division";
+      return "[÷] Division";
     default:
       return operation;
   }

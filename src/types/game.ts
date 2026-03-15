@@ -41,6 +41,7 @@ export interface SessionSummary {
 
 export interface SessionPayload extends SessionSummary {
   history: AttemptRecord[];
+  isGuest?: boolean;
 }
 
 export interface LeaderboardEntry {
