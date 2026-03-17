@@ -2,11 +2,9 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useIdentity } from "@/lib/auth/identity-context";
 import type { NameCheckResponse } from "@/app/api/check-name/route";
 
-const supabase = getSupabaseBrowserClient();
 
 type NameStatus =
   | { kind: "idle" }
@@ -85,21 +83,10 @@ export default function LoginScreen() {
     playAsGuest(trimmed);
   }
 
-  async function handleGoogle() {
-    if (!supabase) return;
+  function handleGoogle() {
     setOauthLoading(true);
-    setOauthError(null);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-    if (error) {
-      setOauthError(error.message);
-      setOauthLoading(false);
-    }
-    // On success the page will redirect; no need to setOauthLoading(false).
+    // Redirect to Clerk-managed sign-in page (handles Google OAuth)
+    window.location.href = "/sign-in?strategy=oauth_google";
   }
 
   return (
@@ -107,15 +94,21 @@ export default function LoginScreen() {
       {/* Decorative dot grid */}
       <div className="pointer-events-none absolute inset-0 grid-dot opacity-35" />
 
-      {/* Decorative blobs — mirrors globals.css radial gradients */}
+      {/* Animated floating blobs */}
       <div
-        className="pointer-events-none absolute inset-0"
+        className="pointer-events-none absolute left-[8%] top-[12%] h-80 w-80 rounded-full animate-float-slow opacity-60"
         aria-hidden="true"
-        style={{
-          background:
-            "radial-gradient(circle at 18% 20%, color-mix(in oklab, var(--accent) 28%, white) 0%, transparent 40%), " +
-            "radial-gradient(circle at 82% 12%, color-mix(in oklab, var(--primary) 20%, white) 0%, transparent 44%)",
-        }}
+        style={{ background: "radial-gradient(circle, color-mix(in oklab, var(--accent) 35%, white), transparent 70%)" }}
+      />
+      <div
+        className="pointer-events-none absolute right-[6%] top-[8%] h-64 w-64 rounded-full animate-float-mid opacity-50"
+        aria-hidden="true"
+        style={{ background: "radial-gradient(circle, color-mix(in oklab, var(--primary) 28%, white), transparent 70%)", animationDelay: "1.4s" }}
+      />
+      <div
+        className="pointer-events-none absolute bottom-[12%] left-[38%] h-48 w-48 rounded-full animate-float-fast opacity-40"
+        aria-hidden="true"
+        style={{ background: "radial-gradient(circle, color-mix(in oklab, var(--secondary) 40%, white), transparent 70%)", animationDelay: "2.8s" }}
       />
 
       <motion.div
@@ -225,8 +218,8 @@ export default function LoginScreen() {
           </button>
         </form>
 
-        {/* Divider + Google — only when Supabase is configured */}
-        {supabase && (
+        {/* Divider + Google sign-in */}
+        {(
           <>
             <div className="my-6 flex items-center gap-3">
               <div className="h-px flex-1 bg-border" />
@@ -266,9 +259,7 @@ export default function LoginScreen() {
         {/* Footer note */}
         <p className="mt-8 text-center text-[11px] text-muted-foreground">
           Scores are saved locally.{" "}
-          {supabase
-            ? "Sign in with Google to sync to the global leaderboard."
-            : "Connect Supabase to enable the global leaderboard."}
+          Sign in with Google to sync to the global leaderboard.
         </p>
       </motion.div>
     </main>

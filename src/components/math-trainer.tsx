@@ -28,18 +28,26 @@ import {
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useIdentity } from "@/lib/auth/identity-context";
 import SessionResultsModal from "@/components/session-results-modal";
+import NumberCustomizer from "@/components/number-customizer";
+import FocusModeModal, { type FeedbackState } from "@/components/focus-mode-modal";
+import {
+  playCorrect,
+  playWrong,
+  playStreak,
+  setMuted,
+  isMuted,
+} from "@/lib/audio/sounds";
 import {
   type AttemptRecord,
   type LeaderboardEntry,
   type MathQuestion,
+  type NumberConfig,
   OPERATION_KEYS,
   type OperationKey,
   type SessionPayload,
 } from "@/types/game";
 
-type FeedbackState =
-  | { kind: "correct" | "wrong"; label: string; delta: number }
-  | null;
+// FeedbackState is re-exported from focus-mode-modal to avoid duplication
 
 type SaveState = "idle" | "saving" | "saved" | "offline" | "error";
 
@@ -131,14 +139,16 @@ function StatTile({
   label,
   value,
   tone = "default",
+  index = 0,
 }: {
   label: string;
   value: string | number;
   tone?: "default" | "accent" | "success" | "warning";
+  index?: number;
 }) {
   const toneClass =
     tone === "accent"
-      ? "border-primary/25 bg-primary/8"
+      ? "border-primary/25 bg-primary/10"
       : tone === "success"
         ? "border-success/30 bg-success/10"
         : tone === "warning"
@@ -146,10 +156,23 @@ function StatTile({
           : "border-border bg-white/55";
 
   return (
-    <div className={`panel-soft p-4 ${toneClass}`}>
+    <motion.div
+      initial={{ opacity: 0, y: 12, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.35, delay: index * 0.06, ease: [0.22, 1, 0.36, 1] }}
+      className={`panel-soft p-4 ${toneClass}`}
+    >
       <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
-      <div className="mt-2 font-mono text-2xl font-semibold text-foreground">{value}</div>
-    </div>
+      <motion.div
+        key={String(value)}
+        initial={{ scale: 0.85, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: "spring", stiffness: 420, damping: 26 }}
+        className="mt-2 font-mono text-2xl font-semibold text-foreground"
+      >
+        {value}
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -160,11 +183,34 @@ export default function MathTrainer() {
 
   const [operationMode, setOperationMode] = useState<OperationMode>("all");
   const [roundSeconds, setRoundSeconds] = useState(90);
+  const [numberConfig, setNumberConfig] = useState<NumberConfig | null>(null);
+  const [isFocusMode, setIsFocusMode] = useState(false);
+  const [showFocusModal, setShowFocusModal] = useState(false);
+
+  // Sound mute toggle — persisted to localStorage
+  const [soundMuted, setSoundMuted] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const saved = window.localStorage.getItem("ninimath:muted");
+    const val = saved === "true";
+    setMuted(val);
+    return val;
+  });
+
+  function toggleMute() {
+    setSoundMuted((prev) => {
+      const next = !prev;
+      setMuted(next);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("ninimath:muted", String(next));
+      }
+      return next;
+    });
+  }
 
   const enabledOperations = MODE_PRESETS.find((p) => p.mode === operationMode)?.ops ?? ALL_OPERATIONS;
 
   const [question, setQuestion] = useState<MathQuestion>(() =>
-    generateQuestion({ enabledOperations: ALL_OPERATIONS, difficulty: 1 }),
+    generateQuestion({ enabledOperations: ALL_OPERATIONS, difficulty: 1, numberConfig: null }),
   );
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState<FeedbackState>(null);
@@ -226,6 +272,7 @@ export default function MathTrainer() {
       generateQuestion({
         enabledOperations: activeOperations,
         difficulty: nextDifficultyValue,
+        numberConfig,
       }),
     );
     questionStartedAtRef.current = performance.now();
@@ -288,6 +335,7 @@ export default function MathTrainer() {
 
     setIsRunning(false);
     setIsSessionOver(true);
+    setShowFocusModal(false);
     setFeedback(
       reason === "timeout"
         ? { kind: "wrong", label: "Time is up", delta: 0 }
@@ -331,9 +379,14 @@ export default function MathTrainer() {
     setShowModal(false);
     setTimeLeftMs(roundSeconds * 1000);
     setIsRunning(true);
-    setQuestion(generateQuestion({ enabledOperations: activeOperations, difficulty: 1 }));
+    setQuestion(generateQuestion({ enabledOperations: activeOperations, difficulty: 1, numberConfig }));
     questionStartedAtRef.current = performance.now();
-    queueMicrotask(() => answerInputRef.current?.focus());
+    if (isFocusMode) {
+      setShowFocusModal(true);
+    } else {
+      setShowFocusModal(false);
+      queueMicrotask(() => answerInputRef.current?.focus());
+    }
   });
 
   const submitAnswer = useEffectEvent((event?: FormEvent<HTMLFormElement>) => {
@@ -373,6 +426,14 @@ export default function MathTrainer() {
 
     setFeedback(nextFeedback);
     animateFeedback(nextFeedback.kind);
+
+    // Play sounds
+    if (isCorrect) {
+      playCorrect();
+      playStreak(nextStreak);
+    } else {
+      playWrong();
+    }
 
     startTransition(() => {
       setHistory((prev) => [attempt, ...prev].slice(0, 60));
@@ -477,6 +538,30 @@ export default function MathTrainer() {
 
   return (
     <main className="relative min-h-screen px-4 py-6 sm:px-6 lg:px-8">
+      {/* Focus Mode Modal */}
+      <AnimatePresence>
+        {showFocusModal && (
+          <FocusModeModal
+            question={question}
+            isRunning={isRunning}
+            timeLeftMs={timeLeftMs}
+            totalRoundMs={totalRoundMs}
+            score={score}
+            streak={streak}
+            accuracy={accuracy}
+            answer={answer}
+            setAnswer={setAnswer}
+            feedback={feedback}
+            onSubmit={submitAnswer}
+            onExit={() => {
+              setShowFocusModal(false);
+              queueMicrotask(() => answerInputRef.current?.focus());
+            }}
+            prefersReducedMotion={prefersReducedMotion}
+          />
+        )}
+      </AnimatePresence>
+
       <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[1.25fr_0.75fr]">
         <motion.section
           initial={prefersReducedMotion ? false : { opacity: 0, y: 16 }}
@@ -531,46 +616,85 @@ export default function MathTrainer() {
               </div>
             </div>
 
-            <div className="mt-5 rounded-2xl border bg-white/65 p-3">
+            <div className="mt-5 rounded-2xl border bg-white/65 p-3 transition-shadow hover:shadow-md">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-[13px] uppercase tracking-[0.18em] text-red-500">
                     Round Timer
                   </div>
-                  <div className="mt-1 font-mono text-2xl font-semibold tracking-tight sm:text-3xl">
+                  <motion.div
+                    key={formatClock(timeLeftMs)}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.14 }}
+                    className="mt-1 font-mono text-2xl font-semibold tracking-tight sm:text-3xl"
+                  >
                     {formatClock(timeLeftMs)}
-                  </div>
+                  </motion.div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {ROUND_OPTIONS.map((seconds) => (
-                    <button
+                    <motion.button
                       key={seconds}
                       type="button"
                       onClick={() => setRoundSeconds(seconds)}
                       disabled={isRunning}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.93 }}
                       className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${roundSeconds === seconds
-                        ? "border-primary/40 bg-primary/10 text-primary"
+                        ? "border-primary/40 bg-primary/10 text-primary shadow-sm"
                         : "border-border bg-white/70 text-foreground hover:bg-white"
                         } disabled:cursor-not-allowed disabled:opacity-55`}
                     >
                       {seconds}s
-                    </button>
+                    </motion.button>
                   ))}
                 </div>
               </div>
-              <div className="mt-3 h-2.5 rounded-full bg-muted/70">
-                <div
-                  ref={progressFillRef}
+              <div className="relative mt-3 h-2.5 overflow-hidden rounded-full bg-muted/70">
+                <motion.div
                   className={`h-full rounded-full ${progressToneClass}`}
-                  style={{ width: `${(timeLeftMs / totalRoundMs) * 100}%` }}
+                  animate={{ width: `${(timeLeftMs / totalRoundMs) * 100}%` }}
+                  transition={{ duration: 0.12, ease: "linear" }}
                 />
               </div>
             </div>
 
             {/* Operation mode selector */}
             <div className="mt-5">
-              <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                Mode
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Mode
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Sound mute toggle */}
+                  <motion.button
+                    type="button"
+                    onClick={toggleMute}
+                    whileHover={{ scale: 1.08 }}
+                    whileTap={{ scale: 0.9 }}
+                    title={soundMuted ? "Unmute sounds" : "Mute sounds"}
+                    className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-white/70 text-base transition hover:bg-white"
+                  >
+                    {soundMuted ? "🔇" : "🔊"}
+                  </motion.button>
+                  {/* Focus Mode toggle */}
+                  <motion.button
+                    type="button"
+                    disabled={isRunning}
+                    onClick={() => setIsFocusMode((v) => !v)}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.95 }}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
+                      isFocusMode
+                        ? "border-foreground/40 bg-foreground text-background"
+                        : "border-border bg-white/70 text-foreground hover:bg-white"
+                    } disabled:cursor-not-allowed disabled:opacity-60`}
+                  >
+                    <span>{isFocusMode ? "◉" : "○"}</span>
+                    Focus Mode
+                  </motion.button>
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {MODE_PRESETS.map(({ mode, label }) => {
@@ -595,13 +719,20 @@ export default function MathTrainer() {
                   );
                 })}
               </div>
+
+              {/* Number customizer */}
+              <NumberCustomizer
+                config={numberConfig}
+                onChange={setNumberConfig}
+                disabled={isRunning}
+              />
             </div>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <StatTile label="Score" value={score} tone="accent" />
-              <StatTile label="Streak" value={streak} tone="success" />
-              <StatTile label="Accuracy" value={`${accuracy}%`} tone="warning" />
-              <StatTile label="Difficulty" value={`${difficulty}/12`} />
+              <StatTile label="Score" value={score} tone="accent" index={0} />
+              <StatTile label="Streak" value={streak} tone="success" index={1} />
+              <StatTile label="Accuracy" value={`${accuracy}%`} tone="warning" index={2} />
+              <StatTile label="Difficulty" value={`${difficulty}/12`} index={3} />
             </div>
 
             <div className="mt-6 rounded-3xl border bg-white/80 p-4 shadow-[0_18px_60px_-40px_rgba(0,0,0,0.4)] sm:p-6">
@@ -650,48 +781,76 @@ export default function MathTrainer() {
                   inputMode="numeric"
                   autoComplete="off"
                   placeholder={isRunning ? "Type answer" : "Press Start Round"}
-                  className="h-14 flex-1 rounded-2xl border bg-white px-4 font-mono text-2xl outline-none placeholder:font-sans placeholder:text-base placeholder:text-muted-foreground/70 focus:border-primary/40 disabled:cursor-not-allowed disabled:bg-muted/60"
+                  className="h-14 flex-1 rounded-2xl border bg-white px-4 font-mono text-2xl outline-none placeholder:font-sans placeholder:text-base placeholder:text-muted-foreground/70 focus:border-primary/40 focus:ring-4 focus:ring-primary/12 disabled:cursor-not-allowed disabled:bg-muted/60 transition-shadow"
                 />
                 <div className="flex gap-3 sm:w-auto">
-                  <button
+                  <motion.button
                     type="submit"
                     disabled={!isRunning}
+                    whileHover={{ scale: isRunning ? 1.02 : 1 }}
+                    whileTap={{ scale: isRunning ? 0.95 : 1 }}
                     className="h-14 flex-1 rounded-2xl bg-primary px-5 text-sm font-semibold text-primary-foreground transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55 sm:flex-none"
                   >
                     Submit
-                  </button>
+                  </motion.button>
                   {!isRunning ? (
-                    <button
+                    <motion.button
                       type="button"
                       onClick={() => startSession()}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.96 }}
                       className="h-14 flex-1 rounded-2xl border border-foreground/10 bg-foreground px-5 text-sm font-semibold text-background transition hover:opacity-95 sm:flex-none"
                     >
                       {isSessionOver ? "Play Again" : "Start Round"}
-                    </button>
+                    </motion.button>
                   ) : (
-                    <button
+                    <motion.button
                       type="button"
                       onClick={() => finishSession("manual")}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.95 }}
                       className="h-14 flex-1 rounded-2xl border border-danger/20 bg-danger/10 px-5 text-sm font-semibold text-danger transition hover:bg-danger/15 sm:flex-none"
                     >
                       End
-                    </button>
+                    </motion.button>
                   )}
                 </div>
               </form>
 
               <div className="mt-4 flex min-h-8 items-center justify-between gap-3 text-sm">
                 <div className="font-medium">
-                  {feedback ? (
-                    <span className={feedback.kind === "correct" ? "text-success-foreground" : "text-danger"}>
-                      {feedback.label}
-                      {feedback.kind === "correct" ? `  +${feedback.delta}` : ""}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      {isRunning ? "Press Enter to submit quickly" : "Choose settings and start"}
-                    </span>
-                  )}
+                  <AnimatePresence mode="wait">
+                    {feedback ? (
+                      <motion.span
+                        key={`${feedback.kind}-${feedback.label}`}
+                        initial={{ opacity: 0, y: 8, scale: 0.85 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.9 }}
+                        transition={{ type: "spring", stiffness: 480, damping: 28 }}
+                        className={`inline-block ${feedback.kind === "correct" ? "text-success-foreground" : "text-danger"}`}
+                      >
+                        {feedback.label}
+                        {feedback.kind === "correct" && (
+                          <motion.span
+                            initial={{ opacity: 0, x: -4 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className="ml-1.5 font-semibold"
+                          >
+                            +{feedback.delta}
+                          </motion.span>
+                        )}
+                      </motion.span>
+                    ) : (
+                      <motion.span
+                        key="hint"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="text-muted-foreground"
+                      >
+                        {isRunning ? "Press Enter to submit quickly" : "Choose settings and start"}
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
                 </div>
                 <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
                   Best streak {bestStreak}
@@ -730,10 +889,20 @@ export default function MathTrainer() {
 
             <div className="mt-4 space-y-2">
               {leaderboard.slice(0, 8).map((entry, index) => (
-                <div key={`${entry.id}-${entry.createdAt}`} className="panel-soft flex items-center justify-between gap-3 p-3">
+                <motion.div
+                  key={`${entry.id}-${entry.createdAt}`}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.28, delay: index * 0.04, ease: [0.22, 1, 0.36, 1] }}
+                  className="panel-soft panel-soft-hover flex items-center justify-between gap-3 p-3 cursor-default"
+                >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full border bg-white px-2 text-xs font-semibold">
+                      <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full border px-2 text-xs font-semibold ${
+                        index === 0 ? "border-warning/50 bg-warning/15 text-warning-foreground" :
+                        index === 1 ? "border-muted-foreground/30 bg-muted/50 text-muted-foreground" :
+                        "bg-white border-border"
+                      }`}>
                         {index + 1}
                       </span>
                       <span className="truncate text-sm font-semibold">{entry.playerName}</span>
@@ -743,7 +912,7 @@ export default function MathTrainer() {
                     </div>
                   </div>
                   <div className="text-right font-mono text-sm font-semibold">{entry.score}</div>
-                </div>
+                </motion.div>
               ))}
 
               {leaderboard.length === 0 ? (
@@ -768,29 +937,35 @@ export default function MathTrainer() {
             </div>
 
             <div className="mt-4 max-h-[420px] space-y-2 overflow-auto pr-1">
-              {deferredHistory.map((attempt) => (
-                <div
-                  key={`${attempt.questionId}-${attempt.createdAt}`}
-                  className={`panel-soft p-3 ${attempt.isCorrect ? "border-success/25 bg-success/8" : "border-danger/18 bg-danger/5"
-                    }`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-mono text-sm font-semibold">{attempt.prompt}</div>
-                    <div
-                      className={`text-xs font-semibold uppercase tracking-[0.15em] ${attempt.isCorrect ? "text-success-foreground" : "text-danger"
-                        }`}
-                    >
-                      {attempt.isCorrect ? "OK" : "MISS"}
+              <AnimatePresence initial={false}>
+                {deferredHistory.map((attempt) => (
+                  <motion.div
+                    key={`${attempt.questionId}-${attempt.createdAt}`}
+                    initial={{ opacity: 0, x: 20, scale: 0.96 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: -10, scale: 0.96 }}
+                    transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                    className={`panel-soft p-3 ${attempt.isCorrect ? "border-success/25 bg-success/8" : "border-danger/18 bg-danger/5"
+                      }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-mono text-sm font-semibold">{attempt.prompt}</div>
+                      <div
+                        className={`text-xs font-semibold uppercase tracking-[0.15em] ${attempt.isCorrect ? "text-success-foreground" : "text-danger"
+                          }`}
+                      >
+                        {attempt.isCorrect ? "✓ OK" : "✗ MISS"}
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                    <div>
-                      You: {attempt.rawAnswer || "-"} | Correct: {attempt.correctAnswer}
+                    <div className="mt-1 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                      <div>
+                        You: {attempt.rawAnswer || "-"} | Correct: {attempt.correctAnswer}
+                      </div>
+                      <div className="font-mono">{formatMs(attempt.responseMs)}</div>
                     </div>
-                    <div className="font-mono">{formatMs(attempt.responseMs)}</div>
-                  </div>
-                </div>
-              ))}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
 
               {deferredHistory.length === 0 ? (
                 <div className="panel-soft p-4 text-sm text-muted-foreground">

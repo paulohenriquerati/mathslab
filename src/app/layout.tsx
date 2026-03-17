@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import { IdentityProvider } from "@/lib/auth/identity-context";
 
@@ -26,10 +27,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${spaceGrotesk.variable} ${ibmPlexMono.variable} min-h-screen antialiased`}>
-        <IdentityProvider>{children}</IdentityProvider>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en">
+        <body className={`${spaceGrotesk.variable} ${ibmPlexMono.variable} min-h-screen antialiased`}>
+          <IdentityProvider>{children}</IdentityProvider>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

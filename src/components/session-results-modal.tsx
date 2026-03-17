@@ -2,8 +2,35 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import type { LeaderboardEntry, SessionPayload } from "@/types/game";
 import { formatMs } from "@/lib/math/scoring";
+import { playScoreTick, playRoundEnd } from "@/lib/audio/sounds";
+
+function useCountUp(target: number, duration = 0.9) {
+  const [display, setDisplay] = useState(0);
+  const prevRef = useRef(0);
+  useEffect(() => {
+    setDisplay(0);
+    prevRef.current = 0;
+    const start = performance.now();
+    const step = () => {
+      const elapsed = (performance.now() - start) / 1000;
+      const t = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - t, 3); // cubic ease-out
+      const next = Math.round(eased * target);
+      if (next !== prevRef.current) {
+        playScoreTick();
+        prevRef.current = next;
+      }
+      setDisplay(next);
+      if (t < 1) requestAnimationFrame(step);
+    };
+    const af = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(af);
+  }, [target, duration]);
+  return display;
+}
 
 interface Props {
   summary: SessionPayload | null;
@@ -44,12 +71,28 @@ function Ring({
   label: string;
   color: string;
 }) {
+  const r = 28;
+  const circ = 2 * Math.PI * r;
   return (
     <div className="flex flex-col items-center gap-1">
-      <div
-        className={`flex h-16 w-16 items-center justify-center rounded-full border-2 ${color} font-mono text-lg font-bold`}
-      >
-        {value}
+      <div className="relative h-16 w-16">
+        <svg className="absolute inset-0 -rotate-90" viewBox="0 0 64 64" fill="none">
+          <circle cx="32" cy="32" r={r} stroke="currentColor" strokeWidth="3" className="text-muted/60" />
+          <motion.circle
+            cx="32" cy="32" r={r}
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            className={color.split(" ")[0].replace("border-", "text-")}
+            strokeDasharray={circ}
+            initial={{ strokeDashoffset: circ }}
+            animate={{ strokeDashoffset: 0 }}
+            transition={{ duration: 0.7, delay: 0.25, ease: [0.22, 1, 0.36, 1] }}
+          />
+        </svg>
+        <div className={`absolute inset-0 flex items-center justify-center font-mono text-lg font-bold ${color.split(" ").slice(1).join(" ")}`}>
+          {value}
+        </div>
       </div>
       <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
         {label}
@@ -66,14 +109,23 @@ export default function SessionResultsModal({
   onClose,
   prefersReducedMotion,
 }: Props) {
-  if (!summary) return null;
+  const displayScore = useCountUp(summary?.score ?? 0, prefersReducedMotion ? 0 : 0.85);
 
-  // Personal best from leaderboard (excluding the current result — it's already
-  // merged in, so we take the top score overall; the current score is summary.score).
+  // Personal best from leaderboard
   const topScore = leaderboard.length > 0
     ? Math.max(...leaderboard.map((e) => e.score))
     : 0;
-  const isNewBest = summary.score > 0 && summary.score >= topScore;
+  const isNewBest = (summary?.score ?? 0) > 0 && (summary?.score ?? 0) >= topScore;
+
+  // Play round-end fanfare on mount — MUST be before any early return (Rules of Hooks)
+  useEffect(() => {
+    if (!summary) return;
+    const t = setTimeout(() => playRoundEnd(isNewBest), 320);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!summary]);
+
+  if (!summary) return null;
 
   // Previous best = best among entries OTHER than this session's score
   // We approximate by using the second-highest unique score.
@@ -118,13 +170,13 @@ export default function SessionResultsModal({
             aria-modal="true"
             aria-label="Round results"
             initial={
-              prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 32, scale: 0.96 }
+              prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 40, scale: 0.94 }
             }
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={
-              prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.97 }
+              prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 20, scale: 0.97 }
             }
-            transition={{ duration: prefersReducedMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: prefersReducedMotion ? 0 : 0.32, ease: [0.22, 1, 0.36, 1] }}
             className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4"
           >
             <div className="panel relative my-auto w-full max-w-lg max-h-[90dvh] flex flex-col overflow-hidden">
@@ -181,9 +233,12 @@ export default function SessionResultsModal({
                     Score
                   </div>
                   <div className="mt-1 flex items-end gap-3">
-                    <span className="font-mono text-5xl font-bold tracking-tight">
-                      {summary.score}
-                    </span>
+                    <motion.span
+                      key={displayScore}
+                      className="font-mono text-5xl font-bold tracking-tight tabular-nums"
+                    >
+                      {displayScore}
+                    </motion.span>
                     <span className="mb-1.5 text-sm text-muted-foreground">pts</span>
                     <div className="mb-1.5">
                       <ScoreDelta

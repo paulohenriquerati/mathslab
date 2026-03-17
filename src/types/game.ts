@@ -7,6 +7,16 @@ export const OPERATION_KEYS = [
 
 export type OperationKey = (typeof OPERATION_KEYS)[number];
 
+export type DigitCount = 1 | 2 | 3;
+
+/** When set, overrides automatic difficulty-based number scaling. */
+export interface NumberConfig {
+  aDigits: DigitCount;
+  bDigits: DigitCount;
+  /** Cap the answer to this value. undefined = no cap. */
+  maxAnswer?: number;
+}
+
 export interface MathQuestion {
   id: string;
   operation: OperationKey;
